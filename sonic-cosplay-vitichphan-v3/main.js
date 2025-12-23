@@ -16,6 +16,7 @@ let checkpointImg = null; // New checkpoint sprite
 let trapImg = null; // New spike trap sprite
 let bossImg = null; // New boss sprite
 let coinImg = null; // New coin sprite
+let endingImg = null; // Ending screen
 
 
 
@@ -49,7 +50,8 @@ const ASSETS = {
   checkpoint: { png: "../newassets/checkpoint.png", json: "../newassets/checkpoint.sprite.json" },
   trap: { png: "../newassets/spike trap (1).png", json: "../newassets/spike.sprite.json" },
   boss: { png: "../newassets/intergral boss.png", json: "../newassets/boss.sprite.json" },
-  coin: { png: "../newassets/coin.png", json: "../newassets/coin.sprite.json" }
+  coin: { png: "../newassets/coin.png", json: "../newassets/coin.sprite.json" },
+  ending: { png: "../newassets/ending.png" }
 };
 
 // Placeholder config for new Player Sprite (needs adjustment based on actual sheet)
@@ -97,6 +99,7 @@ const game = {
   coins: 0, // New global coin counter
   won: false,
   lost: false,
+  victory: false, // Campaign cleared
   msg: ""
 };
 
@@ -133,6 +136,27 @@ function beep(freq = 440, dur = 0.06, type = "square", gain = 0.05) {
 const keys = new Map();
 addEventListener("keydown", (e) => keys.set(e.code, true));
 addEventListener("keyup", (e) => keys.set(e.code, false));
+addEventListener("mousedown", (e) => {
+  if (game.victory) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    // Restart button area: Bottom Right, say 200x60
+    const btnW = 200;
+    const btnH = 60;
+    const btnX = canvas.width - btnW - 30;
+    const btnY = canvas.height - btnH - 30;
+
+    if (x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH) {
+      // Restart Game
+      levelIndex = 0;
+      resetGame();
+      game.victory = false;
+      startLevel(0, { newRun: true });
+      beep(880, 0.1, "square", 0.1);
+    }
+  }
+});
 function down(code) { return keys.get(code) === true; }
 
 // key edge (avoid repeat spam)
@@ -408,6 +432,20 @@ async function loadTiles() {
 }
 
 async function loadOtherAssets() {
+  // Desk platform
+  try {
+    const dRes = await loadAsset(null, "./assets/obstacles/desk_platform.png");
+    deskImg = dRes.img;
+    console.log("[ASSETS] Desk loaded");
+  } catch (e) { console.warn("[ASSETS] Desk load failed"); }
+
+  // Stairs
+  try {
+    const sRes = await loadAsset(null, "./assets/obstacles/stairs_tile.png");
+    stairsImg = sRes.img;
+    console.log("[ASSETS] Stairs loaded");
+  } catch (e) { console.warn("[ASSETS] Stairs load failed"); }
+
   // Checkpoint
   const cRes = await loadAsset(ASSETS.checkpoint.png, null);
   checkpointImg = cRes.img;
@@ -999,8 +1037,7 @@ function getHellTileSrc(x, y) {
 }
 
 function drawMap() {
-  // Skip all ground/tile rendering - only draw special obstacles
-  // Ground is already visible as part of background
+  // Ground is part of background - no tile rendering needed
 
   // Visual overlays for special obstacles
   drawVietnamStairs();
@@ -1397,6 +1434,7 @@ function resetGame() {
   game.dashCD = 0;
   game.won = false;
   game.lost = false;
+  game.victory = false;
   game.msg = "";
   for (const p of pickups) p.alive = true;
   for (const h of hazards) h.alive = true;
@@ -1953,8 +1991,51 @@ function drawTraps() {
   }
 }
 
+function drawEnding() {
+  if (!endingImg) {
+    // Fallback if image load fails
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "40px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("YOU WON!", canvas.width / 2, canvas.height / 2);
+  } else {
+    ctx.drawImage(endingImg, 0, 0, canvas.width, canvas.height);
+  }
+
+  // Draw Restart Button (Bottom Right)
+  const btnW = 200;
+  const btnH = 60;
+  const btnX = canvas.width - btnW - 30;
+  const btnY = canvas.height - btnH - 30;
+
+  // Button BG
+  ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.beginPath();
+  ctx.roundRect(btnX, btnY, btnW, btnH, 10);
+  ctx.fill();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "#fff";
+  ctx.stroke();
+
+  // Button Text
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 24px system-ui";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("RESTART", btnX + btnW / 2, btnY + btnH / 2);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+}
+
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (game.victory) {
+    drawEnding();
+    return;
+  }
 
   // Background image (fallback to dots if not loaded)
   const hasBg = drawBackground();
@@ -2070,6 +2151,18 @@ async function tryAutoLoadPlayer() {
   }
 }
 
+
+
+async function loadEndingAssets() {
+  try {
+    const res = await loadAsset(ASSETS.ending.png, null);
+    endingImg = res.img;
+    console.log("[ASSETS] Ending image loaded");
+  } catch (e) {
+    console.error("[ASSETS] Ending load failed", e);
+  }
+}
+
 async function initEnemy() {
   try {
     enemySheet = await loadSpriteByPath("./assets/enemies/vitichphan_monster.png", "./assets/enemies/vitichphan_monster.sprite.json");
@@ -2096,14 +2189,16 @@ async function initEnemy() {
   }
 }
 
+
+
 async function boot() {
   await Promise.all([
     tryAutoLoadPlayer(),
     loadBg(),
     loadTiles(),
     loadUIIcons(),
-    loadObstacles(),
-    loadOtherAssets(), // Added
+    loadOtherAssets(),
+    loadEndingAssets(),
     initEnemy(),
     loadLevel(levelPath(levelIndex))
   ]);
@@ -2158,6 +2253,12 @@ function loop(now) {
       if (levelIndex < LEVEL_FILES.length - 1) {
         // carry over credits/DRL but reset combat stats
         startLevel(levelIndex + 1, { newRun: false }).then(() => { });
+      } else {
+        // VICTORY - All levels cleared
+        game.victory = true;
+        beep(523, 0.1, "triangle", 0.1);
+        beep(659, 0.1, "triangle", 0.1);
+        beep(784, 0.2, "triangle", 0.1);
       }
     }
   }
